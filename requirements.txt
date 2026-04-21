@@ -8,5 +8,4 @@ seaborn
 jupyter
 tqdm
 streamlit
-opendatasets
 kaggle
