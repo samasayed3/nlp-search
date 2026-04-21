@@ -9,3 +9,4 @@ jupyter
 tqdm
 streamlit
 opendatasets
+kaggle
