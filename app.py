@@ -10,6 +10,8 @@ import sys
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import json
+from kaggle.api.kaggle_api_extended import KaggleApi
 
 # ─────────────────────────────────────────────
 # Page config
@@ -24,17 +26,73 @@ st.title("🔍 Intelligent Search Engine")
 st.caption("Project 2 – NLP Course | Faculty of Computing & AI")
 
 # ─────────────────────────────────────────────
-# Data path  (local file – no Kaggle needed)
+# Data path (Kaggle auto download)
 # ─────────────────────────────────────────────
 REVIEWS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "Reviews.csv")
+KAGGLE_DATASET = "snap/amazon-fine-food-reviews"
 
-if not os.path.exists(REVIEWS_PATH):
-    st.error(
-        "❌ ملف البيانات مش موجود.\n\n"
-        "حمل **Reviews.csv** من Kaggle وحطه في مجلد `data/`\n\n"
-        "🔗 https://www.kaggle.com/datasets/snap/amazon-fine-food-reviews"
+
+def setup_kaggle():
+    """Setup Kaggle credentials from Streamlit secrets"""
+    try:
+        kaggle_user = st.secrets["KAGGLE_USERNAME"]
+        kaggle_key = st.secrets["KAGGLE_KEY"]
+    except Exception:
+        st.error("❌ لازم تضيف Kaggle credentials في Streamlit secrets")
+        st.stop()
+
+    kaggle_dir = os.path.expanduser("~/.kaggle")
+    os.makedirs(kaggle_dir, exist_ok=True)
+
+    with open(os.path.join(kaggle_dir, "kaggle.json"), "w") as f:
+        json.dump({"username": kaggle_user, "key": kaggle_key}, f)
+
+    os.chmod(os.path.join(kaggle_dir, "kaggle.json"), 0o600)
+
+
+def download_dataset():
+    """Download dataset using Kaggle API"""
+    st.info("📥 جارٍ تحميل الداتا من Kaggle...")
+
+    api = KaggleApi()
+    api.authenticate()
+
+    os.makedirs("data", exist_ok=True)
+
+    api.dataset_download_files(
+        KAGGLE_DATASET,
+        path="data",
+        unzip=True
     )
-    st.stop()
+
+    # نقل الملف للمسار المطلوب
+    downloaded_path = os.path.join("data", "amazon-fine-food-reviews", "Reviews.csv")
+    if os.path.exists(downloaded_path):
+        import shutil
+        shutil.copy(downloaded_path, REVIEWS_PATH)
+
+    st.success("✅ تم تحميل الداتا بنجاح!")
+
+
+def ensure_data():
+    """Ensure dataset exists"""
+    if os.path.exists(REVIEWS_PATH):
+        return
+
+    st.warning("⚠️ الداتا مش موجودة — هيتم تحميلها تلقائيًا")
+
+    try:
+        setup_kaggle()
+        download_dataset()
+    except Exception as e:
+        st.error(f"❌ فشل تحميل الداتا: {e}")
+        st.stop()
+
+
+# ─────────────────────────────────────────────
+# Ensure data exists
+# ─────────────────────────────────────────────
+ensure_data()
 
 
 # ─────────────────────────────────────────────
@@ -118,7 +176,6 @@ if search_btn and query.strip():
 
     st.subheader(f"نتايج البحث عن: `{query}`")
 
-    # ── Run both searches ────────────────────────────────────────────────────
     tfidf_results = search_tfidf(query, vectorizer, tfidf_matrix, documents, top_k)
     emb_results   = search_embeddings(query, emb_model, embeddings, documents, top_k)
 
@@ -129,7 +186,6 @@ if search_btn and query.strip():
             for r in results
         ])
 
-    # ── Show raw results based on model choice ───────────────────────────────
     show_tfidf = model_choice in ["TF-IDF فقط", "الكل"]
     show_emb   = model_choice in ["Embedding فقط", "الكل"]
     show_eval  = model_choice in ["مقارنة الموديلات", "الكل"]
@@ -142,14 +198,12 @@ if search_btn and query.strip():
         st.markdown("### 🧠 Embedding Results")
         st.dataframe(to_df(emb_results), use_container_width=True, hide_index=True)
 
-    # ── Evaluation section ───────────────────────────────────────────────────
     if show_eval:
         st.markdown("---")
         st.markdown("### 📊 تقييم الموديلات – Model Evaluation")
 
         eval_data = evaluate_for_streamlit(query, tfidf_results, emb_results, k=top_k)
 
-        # Metrics row
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric(f"TF-IDF Precision@{top_k}", f"{eval_data['p_tfidf']:.4f}")
@@ -159,26 +213,22 @@ if search_btn and query.strip():
             icons = {"TF-IDF": "🏆 TF-IDF", "Embedding": "🏆 Embedding", "Tie": "🤝 Tie"}
             st.metric("Winner", icons[eval_data["winner"]])
 
-        # Bar chart
         st.markdown("#### Precision Comparison")
         st.pyplot(eval_data["bar_fig"])
         plt.close(eval_data["bar_fig"])
 
-        # Summary table
         st.markdown("#### Summary")
         st.dataframe(
             pd.DataFrame(eval_data["summary_rows"]),
             use_container_width=True, hide_index=True
         )
 
-        # Detailed per-rank comparison
         st.markdown("#### Detailed Results Comparison")
         st.dataframe(
             pd.DataFrame(eval_data["detail_rows"]),
             use_container_width=True, hide_index=True
         )
 
-        # Relevance statistics
         st.markdown("#### Relevance Statistics")
         c1, c2 = st.columns(2)
         with c1:
@@ -190,7 +240,6 @@ if search_btn and query.strip():
             st.write(f"- Relevant in top-{top_k}: {sum(eval_data['emb_flags'])}/{top_k}")
             st.write(f"- Precision@{top_k}: {eval_data['p_emb']:.4f}")
 
-    # ── Full-text expanders ───────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("#### 📖 النص الكامل للنتايج")
 
